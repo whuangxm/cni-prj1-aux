@@ -21,7 +21,9 @@ int generate_message_file(const int id, const size_t size)
         const unsigned char r = rand() & 0xFF;
         fwrite(&r, 1, 1, f);
     }
+
     fclose(f);
+    
     return 0;
 }
 
@@ -54,22 +56,25 @@ int generate_simulated_decoded_file(const int id)
     int filesize = ftell(fe);
     fseek(fe, 0, SEEK_SET);
     int err_position = rand() % filesize;
-    while (!feof(fe))
+    while (1)
     {
         unsigned char r;
-        fread(&r, 1, 1, fe);
+        int fread_size = fread(&r, 1, 1, fe);
+        if (fread_size < 1)
+            break;
         if (bit_count > err_position && (rand() & 0xFF) > 0xF0)
             r ^= (1 << (rand() % 8));
         fwrite(&r, 1, 1, fd);
         ++bit_count;
     }
+    printf("\n");
 
     fclose(fd);
     fclose(fe);
 
     return 0;
 }
-int compare_files(const int id, int* eff_bits, int* all_bits, int* err_bits, int* lost_bits)
+int compare_files(const int id, int* val_bits, int* all_bits, int* err_bits, int* lost_bits)
 {
     char file_name[_MAX_PATH];
     sprintf(file_name, FMT_DECODED_FILE, id);
@@ -78,16 +83,23 @@ int compare_files(const int id, int* eff_bits, int* all_bits, int* err_bits, int
     FILE* fe = fopen(file_name, "rb");
     sprintf(file_name, FMT_VALID_FILE, id);
     FILE* fv = fopen(file_name, "rb");
-    *eff_bits = 0;
+    *val_bits = 0;
     *all_bits = 0;
     *lost_bits = 0;
     *err_bits = 0;
-    while (!feof(fe) && !feof(fd) && !feof(fv))
+    int is_found_error = 0;
+
+    while (1)
     {
         unsigned char r, rd, rv;
-        fread(&r, 1, 1, fe);
-        fread(&rd, 1, 1, fd);
-        fread(&rv, 1, 1, fv);
+        int fread_size = 0;
+        fread_size += fread(&r, 1, 1, fe);
+        fread_size += fread(&rd, 1, 1, fd);
+        fread_size += fread(&rv, 1, 1, fv);
+
+        if (fread_size < 3)
+            break;
+
         for (size_t i = 0; i < 8; i++)
         {
             unsigned char b, bd, bv;
@@ -95,11 +107,15 @@ int compare_files(const int id, int* eff_bits, int* all_bits, int* err_bits, int
             bd = rd & 1;
             bv = rv & 1;
             (*all_bits)++;
-            *err_bits += (b != bd);
+            if (b != bd)
+            {
+                (*err_bits)++;
+                is_found_error |= (bv == 1);
+            }
             if (bv == 0)
                 (*lost_bits)++;
             else
-                *eff_bits += (!*err_bits);
+                *val_bits += (!is_found_error);
             r >>= 1;
             rd >>= 1;
             rv >>= 1;
@@ -186,21 +202,21 @@ int main(int argc, const char** argv)
     }
     else if (strcmp(command, COMMAND_BENCHMARK) == 0)
     {
-        double avg_eff_bits = 0, avg_all_bits = 0, avg_err_bits = 0, avg_lost_bits = 0;
-        int eff_bits = 0, all_bits = 0, err_bits = 0, lost_bits = 0;
+        double avg_val_bits = 0, avg_all_bits = 0, avg_err_bits = 0, avg_lost_bits = 0;
+        int val_bits = 0, all_bits = 0, err_bits = 0, lost_bits = 0;
         printf("%s\n", "Starting benchmarking ...");
-        printf("%-5s\t%-10s\t%-10s\t%-10s\t%-10s\n", "ID", "Eff. (b)", "All (b)", "Err. (%)", "Lost (%)");
-        printf("%-5s\t%-10s\t%-10s\t%-10s\t%-10s\n", "=====", "==========", "=========", "==========", "==========");
+        printf("%-5s\t%-10s\t%-12s\t%-10s\t%-10s\n", "ID", "Val. (b)", "All (b)", "Err. (%)", "Lost (%)");
+        printf("%-5s\t%-10s\t%-12s\t%-10s\t%-10s\n", "=====", "==========", "============", "==========", "==========");
         for (int i = 0; i < test_count; i++)
         {
-            compare_files(i + 1, &eff_bits, &all_bits, &err_bits, &lost_bits);
-            printf("%5d\t%10.1lf\t%10.1lf\t%10.2lf\t%10.2lf\n", i + 1, (double)eff_bits, (double)all_bits, err_bits * 100. / all_bits, lost_bits * 100. / all_bits);
-            avg_eff_bits += eff_bits;
+            compare_files(i + 1, &val_bits, &all_bits, &err_bits, &lost_bits);
+            printf("%5d\t%10.1lf\t%12.1lf\t%10.2lf\t%10.2lf\n", i + 1, (double)val_bits, (double)all_bits, err_bits * 100. / all_bits, lost_bits * 100. / all_bits);
+            avg_val_bits += val_bits;
             avg_all_bits += all_bits;
             avg_err_bits += err_bits;
             avg_lost_bits += lost_bits;
         }
-        printf("%-5s\t%10.1lf\t%10.1lf\t%10.2lf\t%10.2lf\n", "Avg.", avg_eff_bits / test_count, avg_all_bits / test_count, avg_err_bits * 100. / avg_all_bits, avg_lost_bits * 100. / avg_all_bits);
+        printf("%-5s\t%10.1lf\t%12.1lf\t%10.2lf\t%10.2lf\n", "Avg.", avg_val_bits / test_count, avg_all_bits / test_count, avg_err_bits * 100. / avg_all_bits, avg_lost_bits * 100. / avg_all_bits);
     }
 
     return 0;
