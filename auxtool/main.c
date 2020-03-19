@@ -1,6 +1,8 @@
 ﻿#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+
 #define FMT_ENCODED_FILE "e%d.bin"
 #define FMT_DECODED_FILE "%d.bin"
 #define FMT_VALID_FILE "v%d.bin"
@@ -9,6 +11,7 @@
 #define COMMAND_BENCHMARK "bench"
 #define COMMAND_HELP "/?"
 #define RAND_SEED 8000
+#define TORRENT_ERR_RATE 0.0003
 
 int generate_message_file(const int id, const size_t size)
 {
@@ -56,14 +59,18 @@ int generate_simulated_decoded_file(const int id)
     int filesize = ftell(fe);
     fseek(fe, 0, SEEK_SET);
     int err_position = rand() % filesize;
+
     while (1)
     {
         unsigned char r;
         int fread_size = fread(&r, 1, 1, fe);
+
         if (fread_size < 1)
             break;
+        
         if (bit_count > err_position && (rand() & 0xFF) > 0xF0)
             r ^= (1 << (rand() % 8));
+        
         fwrite(&r, 1, 1, fd);
         ++bit_count;
     }
@@ -74,6 +81,7 @@ int generate_simulated_decoded_file(const int id)
 
     return 0;
 }
+
 int compare_files(const int id, int* val_bits, int* all_bits, int* err_bits, int* lost_bits)
 {
     char file_name[_MAX_PATH];
@@ -87,7 +95,19 @@ int compare_files(const int id, int* val_bits, int* all_bits, int* err_bits, int
     *all_bits = 0;
     *lost_bits = 0;
     *err_bits = 0;
-    int is_found_error = 0;
+    
+    if (!fd || !fe || !fv)
+    {
+        fprintf(stderr, "Error: File not found.\n");
+        return 1;
+    }
+    fseek(fd, 0, SEEK_END);
+    const int decoded_bit_length = ftell(fd) * 8;
+    fseek(fd, 0, SEEK_SET);
+    
+    int found_error = 0;
+    const int decoded_max_error_bit_length = (int)floor(decoded_bit_length * TORRENT_ERR_RATE);
+    int count = 0;
 
     while (1)
     {
@@ -110,15 +130,16 @@ int compare_files(const int id, int* val_bits, int* all_bits, int* err_bits, int
             if (b != bd)
             {
                 (*err_bits)++;
-                is_found_error |= (bv == 1);
+                found_error += (bv == 1);
             }
             if (bv == 0)
                 (*lost_bits)++;
             else
-                *val_bits += (!is_found_error);
+                *val_bits += (found_error <= decoded_max_error_bit_length);
             r >>= 1;
             rd >>= 1;
             rv >>= 1;
+            count++;
         }
     }
 
@@ -148,7 +169,7 @@ void usage(const char* file_name)
 
 int main(int argc, const char** argv)
 {
-    const char* command = COMMAND_TEST;
+    const char* command = COMMAND_BENCHMARK;
     const int DEFAULT_TEST_COUNT = 5;
     const unsigned int DEFAULT_FILE_SIZE = 1024 * 1024;
 
@@ -209,12 +230,14 @@ int main(int argc, const char** argv)
         printf("%-5s\t%-10s\t%-12s\t%-10s\t%-10s\n", "=====", "==========", "============", "==========", "==========");
         for (int i = 0; i < test_count; i++)
         {
-            compare_files(i + 1, &val_bits, &all_bits, &err_bits, &lost_bits);
-            printf("%5d\t%10.1lf\t%12.1lf\t%10.2lf\t%10.2lf\n", i + 1, (double)val_bits, (double)all_bits, err_bits * 100. / all_bits, lost_bits * 100. / all_bits);
-            avg_val_bits += val_bits;
-            avg_all_bits += all_bits;
-            avg_err_bits += err_bits;
-            avg_lost_bits += lost_bits;
+            if (compare_files(i + 1, &val_bits, &all_bits, &err_bits, &lost_bits)==0)
+            {
+                printf("%5d\t%10.1lf\t%12.1lf\t%10.2lf\t%10.2lf\n", i + 1, (double)val_bits, (double)all_bits, err_bits * 100. / all_bits, lost_bits * 100. / all_bits);
+                avg_val_bits += val_bits;
+                avg_all_bits += all_bits;
+                avg_err_bits += err_bits;
+                avg_lost_bits += lost_bits;
+            }
         }
         printf("%-5s\t%10.1lf\t%12.1lf\t%10.2lf\t%10.2lf\n", "Avg.", avg_val_bits / test_count, avg_all_bits / test_count, avg_err_bits * 100. / avg_all_bits, avg_lost_bits * 100. / avg_all_bits);
     }
