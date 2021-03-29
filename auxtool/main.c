@@ -3,6 +3,10 @@
 #include <string.h>
 #include <math.h>
 
+#ifndef _MAX_PATH
+#define _MAX_PATH   260 // max. length of full pathname
+#endif // !_MAX_PATH
+
 #define FMT_ENCODED_FILE "e%d.bin"
 #define FMT_DECODED_FILE "%d.bin"
 #define FMT_VALID_FILE "v%d.bin"
@@ -63,7 +67,7 @@ int generate_simulated_decoded_file(const int id)
     while (1)
     {
         unsigned char r;
-        int fread_size = fread(&r, 1, 1, fe);
+        size_t fread_size = fread(&r, 1, 1, fe);
 
         if (fread_size < 1)
             break;
@@ -112,7 +116,7 @@ int compare_files(const int id, int* val_bits, int* all_bits, int* err_bits, int
     while (1)
     {
         unsigned char r, rd, rv;
-        int fread_size = 0;
+        size_t fread_size = 0;
         fread_size += fread(&r, 1, 1, fe);
         fread_size += fread(&rd, 1, 1, fd);
         fread_size += fread(&rv, 1, 1, fv);
@@ -240,6 +244,9 @@ int main(int argc, const char** argv)
             }
         }
         printf("%-5s\t%10.1lf\t%12.1lf\t%10.2lf\t%10.2lf\n", "Avg.", avg_val_bits / test_count, avg_all_bits / test_count, avg_err_bits * 100. / avg_all_bits, avg_lost_bits * 100. / avg_all_bits);
+    } else {
+        usage(argv[0]);
+        return 1;
     }
 
     return 0;
